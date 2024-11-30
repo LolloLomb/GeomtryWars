@@ -2,6 +2,7 @@
 
 #include "Vec2.h"
 #include "SFML/Graphics.hpp"
+#include <cmath>
 
 class CTransform{
 public:

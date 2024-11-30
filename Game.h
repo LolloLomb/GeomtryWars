@@ -20,6 +20,8 @@ private:
 	int					m_score = 0;					
 	int					m_currentFrame = 0;
 	int					m_lastEnemySpawnTime = 0;
+	int					m_specialCooldown = 180;
+	int					m_lastSpecialSpawnTime = 0;
 	bool				m_paused = false;				//If game logic is updated
 	bool				m_running = true;				//If the game is running
 

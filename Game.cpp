@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <cmath>
+#include <typeinfo>
 
 #define PI_CONV 3.1415926 * 2 / 360;
 
@@ -150,12 +151,11 @@ void Game::spawnPlayer(){
 }
 
 void Game::spawnEnemy(){
-    // L'outline è calcolata all'esterno, bisogna includerla nel calcolo
     auto entity = m_entities.addEntity("enemy");
     
     entity->cShape =        std::make_shared<CShape>(m_enemyConfig.SR,    
                                                     rand() % (m_enemyConfig.VMAX - m_enemyConfig.VMIN) + m_enemyConfig.VMIN, 
-                                                    sf::Color(10, 10, 10),
+                                                    sf::Color(0, 0, 0),
                                                     sf::Color(m_enemyConfig.OR, m_enemyConfig.OG, m_enemyConfig.OB), 
                                                     m_enemyConfig.OT);
 
@@ -176,15 +176,11 @@ void Game::spawnEnemy(){
     entity->cCollision = std::make_shared<CCollision>(m_enemyConfig.CR);
     entity->cLifespan = std::make_shared<CLifespan>(m_enemyConfig.L);
     entity->cScore = std::make_shared<CScore>(100);
-
     m_lastEnemySpawnTime = m_currentFrame;
 }
 
 void Game::spawnSmallEnemies(std::shared_ptr<Entity> entity){
-    // devono nascere piccole entità dal luogo di morte dell'entità
     size_t smallEnemiesQuantity = entity->cShape->circle.getPointCount();
-    //Vec2 startingPoint = entity->cTransform->pos;
-    //Vec2 velocity = entity->cTransform->velocity;
 
     for (size_t i = 0; i < smallEnemiesQuantity; i++){
         auto smallEntity = m_entities.addEntity("small_entity");
@@ -206,7 +202,6 @@ void Game::spawnSmallEnemies(std::shared_ptr<Entity> entity){
         velocity /= velocity.length();
 
         smallEntity->cTransform = std::make_shared<CTransform>(smallStartingPoint, velocity, 0.0f);
-        
     }
 }
 
@@ -214,8 +209,8 @@ void Game::spawnBullet(std::shared_ptr<Entity> entity, const Vec2& mousePos){
     auto e = m_entities.addEntity("bullet");
     e->cShape = std::make_shared<CShape>(   m_bulletConfig.SR, 
                                             m_bulletConfig.V, 
-                                            sf::Color(m_bulletConfig.OR, m_bulletConfig.OG, m_bulletConfig.OB), 
-                                            sf::Color(m_bulletConfig.FR, m_bulletConfig.FG, m_bulletConfig.FB), 
+                                            sf::Color(m_bulletConfig.FR, m_bulletConfig.FG, m_bulletConfig.FB),
+                                            sf::Color(m_bulletConfig.OR, m_bulletConfig.OG, m_bulletConfig.OB),
                                             m_bulletConfig.OT);
 
     Vec2 direction = mousePos - m_player->cTransform->pos;
@@ -226,6 +221,26 @@ void Game::spawnBullet(std::shared_ptr<Entity> entity, const Vec2& mousePos){
 
     e->cLifespan = std::make_shared<CLifespan>(m_bulletConfig.L);
     e->cCollision = std::make_shared<CCollision>(m_bulletConfig.CR);
+}
+
+void Game::spawnSpecialWeapon(std::shared_ptr<Entity> entity, const Vec2& mousePos){
+    auto e = m_entities.addEntity("special");
+    int radius = m_bulletConfig.SR * 2;
+
+    e->cShape = std::make_shared<CShape>(   radius, 
+                                            3, 
+                                            sf::Color::Black,
+                                            sf::Color::Yellow,
+                                            m_bulletConfig.OT);
+
+    Vec2 direction = mousePos - m_player->cTransform->pos;
+    float norm = direction.length();
+
+    e->cTransform = std::make_shared<CTransform>(   m_player->cTransform->pos,
+                                                    (direction / norm) * m_bulletConfig.S / 2, 0.0f);
+
+    e->cLifespan = std::make_shared<CLifespan>(m_bulletConfig.L * 2);
+    e->cCollision = std::make_shared<CCollision>(radius);
 }
 
 void Game::sLifeSpan(){
@@ -243,6 +258,13 @@ void Game::sLifeSpan(){
                 e->cShape->circle.setOutlineColor(sf::Color(    e->cShape->circle.getOutlineColor().r,
                                                                 e->cShape->circle.getOutlineColor().g,
                                                                 e->cShape->circle.getOutlineColor().b,
+                                                                alphaMultiplier));
+            }
+            if (e->tag() == "special" || e ->tag() == "bullet"){
+                float alphaMultiplier = static_cast<float>(e->cLifespan->remaining)/e->cLifespan->total * 255;
+                e->cShape->circle.setFillColor(sf::Color(       e->cShape->circle.getFillColor().r,
+                                                                e->cShape->circle.getFillColor().g,
+                                                                e->cShape->circle.getFillColor().b,
                                                                 alphaMultiplier));
             }
         }
@@ -310,7 +332,7 @@ void Game::sCollision() {
     for (auto bullet : m_entities.getEntities("bullet")){
         for (auto enemy : m_entities.getEntities()){
             if (enemy->tag() == "enemy" || enemy->tag() == "small_entity"){
-                float distance = bullet->cTransform->pos.dist(Vec2(enemy->cTransform->pos));
+                float distance = bullet->cTransform->pos.dist(enemy->cTransform->pos);
                 if (distance <= bullet->cCollision->radius + enemy->cCollision->radius){
                     m_score += enemy->cScore->score;
                     m_scoreText.setString(std::to_string(m_score));
@@ -323,6 +345,37 @@ void Game::sCollision() {
             }
         }
     }
+    // Collisione speciale-nemico
+    for (auto special : m_entities.getEntities("special")){
+        for (auto e : m_entities.getEntities()){
+            if (e->tag() == "enemy" || e->tag() == "small_entity"){
+                float distance = special->cTransform->pos.dist(e->cTransform->pos);
+                if (distance <= special->cCollision->radius + e->cCollision->radius){
+                    m_score += e->cScore->score;
+                    m_scoreText.setString(std::to_string(m_score));
+                    if (e->tag() == "enemy")
+                        spawnSmallEnemies(e);
+                    e->destroy();
+                }
+            }
+        }
+    }
+    // Collisione speciale-bordo
+    for (auto special : m_entities.getEntities("special")){
+        if( special->cTransform->pos.x - special->cCollision->radius < 0 || 
+            special->cTransform->pos.x + special->cCollision->radius > m_window.getSize().x){
+
+            special->cTransform->velocity.x *= -1;
+                
+        }
+        if( special->cTransform->pos.y - special->cCollision->radius < 0 ||
+            special->cTransform->pos.y + special->cCollision->radius > m_window.getSize().y){
+
+            special->cTransform->velocity.y *= -1;
+        }
+    }
+
+
     // Collisione con piccolo nemico
     for (auto e : m_entities.getEntities("small_entity")){
         float distance = e->cTransform->pos.dist(m_player->cTransform->pos);
@@ -340,7 +393,7 @@ void Game::sUserInput() {
 
     sf::Event event;
     static bool lockBullet;
-
+    static bool lockSpecial;
     while(m_window.pollEvent(event)){
         if (event.type == sf::Event::Closed){
             m_running = false;
@@ -351,11 +404,19 @@ void Game::sUserInput() {
                 lockBullet = true;
                 m_player->cInput->shoot = true;
             }
+            if (event.mouseButton.button == sf::Mouse::Right && lockSpecial != true){
+                lockSpecial = true;
+                m_player->cInput->special = true;
+            }
         }
         if (event.type == sf::Event::MouseButtonReleased){
             if (event.mouseButton.button == sf::Mouse::Left && lockBullet == true){
                 lockBullet = false;
                 m_player->cInput->shoot = false;
+            }
+            if (event.mouseButton.button == sf::Mouse::Right && lockSpecial == true){
+                lockSpecial = false;
+                m_player->cInput->special = false;
             }
         }
         if (event.type == sf::Event::KeyPressed){
@@ -415,4 +476,10 @@ void Game::sSpawner() {
         m_player->cInput->shoot = false;
     }
     // Spawn dell'arma speciale
+    if (m_player->cInput->special == true && m_currentFrame - m_lastSpecialSpawnTime >= m_specialCooldown){
+        Vec2 mouse(sf::Mouse::getPosition(m_window).x, sf::Mouse::getPosition(m_window).y);
+        spawnSpecialWeapon(m_player, mouse);
+        m_player->cInput->special = false;
+        m_lastSpecialSpawnTime = m_currentFrame;
+    }
 }
